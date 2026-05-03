@@ -272,6 +272,51 @@ body {
 @keyframes loadPulse { 0%{width:0%} 50%{width:80%} 100%{width:100%} }
 .loading-txt { font-family:'Orbitron',monospace;font-size:11px;letter-spacing:4px;color:var(--cyan);animation:pulse 1.5s ease-in-out infinite; }
 
+/* PANTALLA DE CONTRASEÑA */
+.pass-screen {
+  position:fixed;inset:0;background:rgba(0,0,0,0.88);
+  backdrop-filter:blur(10px);z-index:2000;
+  display:flex;align-items:center;justify-content:center;padding:20px;
+}
+.pass-screen.hidden { display:none; }
+.pass-box {
+  background:rgba(2,12,28,0.98);border:1px solid var(--cyan);
+  border-radius:8px;padding:36px 32px;width:100%;max-width:400px;
+  position:relative;box-shadow:0 0 60px rgba(0,245,255,0.2);
+  text-align:center;
+}
+.pass-box::before { content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--cyan),transparent); }
+.pass-icon { font-size:36px;margin-bottom:14px;display:block; }
+.pass-title { font-family:'Orbitron',monospace;font-size:13px;font-weight:700;letter-spacing:3px;color:var(--cyan);text-transform:uppercase;margin-bottom:6px; }
+.pass-sub { font-family:'Share Tech Mono',monospace;font-size:10px;color:rgba(200,232,255,0.35);letter-spacing:2px;margin-bottom:22px; }
+.pass-input {
+  width:100%;background:rgba(0,0,0,0.6);
+  border:1px solid rgba(0,245,255,0.3);border-radius:4px;
+  padding:12px 16px;color:#fff;font-family:'Share Tech Mono',monospace;
+  font-size:14px;outline:none;text-align:center;letter-spacing:3px;
+  transition:border-color 0.25s;margin-bottom:14px;
+}
+.pass-input:focus { border-color:var(--cyan);box-shadow:0 0 12px rgba(0,245,255,0.15); }
+.pass-input.error { border-color:var(--red);box-shadow:0 0 12px rgba(255,68,85,0.2);animation:shake 0.35s ease; }
+@keyframes shake { 0%,100%{transform:translateX(0)} 20%,60%{transform:translateX(-6px)} 40%,80%{transform:translateX(6px)} }
+.pass-btn {
+  width:100%;font-family:'Orbitron',monospace;font-size:11px;font-weight:700;
+  letter-spacing:3px;padding:13px;border:1px solid var(--cyan);color:var(--cyan);
+  background:rgba(0,245,255,0.07);border-radius:4px;cursor:pointer;
+  transition:all 0.25s;text-transform:uppercase;
+}
+.pass-btn:hover { background:rgba(0,245,255,0.15);box-shadow:0 0 20px rgba(0,245,255,0.25); }
+.pass-error { font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--red);letter-spacing:2px;margin-top:10px;height:16px;transition:opacity 0.3s; }
+.pass-hint { font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(200,232,255,0.2);letter-spacing:1px;margin-top:18px; }
+
+/* BADGE modo admin en tabs */
+.admin-badge {
+  display:inline-block;font-family:'Share Tech Mono',monospace;font-size:8px;
+  background:rgba(0,255,136,0.15);border:1px solid var(--green);
+  color:var(--green);border-radius:10px;padding:1px 7px;margin-left:6px;
+  letter-spacing:1px;vertical-align:middle;
+}
+
 /* CLASS COLORS */
 .c-tanque    { --cc:#ff4455;color:#ff4455; }
 .c-speedster { --cc:#00f5ff;color:#00f5ff; }
@@ -294,6 +339,21 @@ body {
 <div class="loading-screen" id="loadingScreen">
   <div class="loading-txt">CONECTANDO AL SERVIDOR...</div>
   <div class="loading-bar-wrap"><div class="loading-bar"></div></div>
+</div>
+
+<!-- PANTALLA DE CONTRASEÑA ADMIN -->
+<div class="pass-screen hidden" id="passScreen">
+  <div class="pass-box">
+    <span class="pass-icon">🔐</span>
+    <div class="pass-title">Acceso Game Master</div>
+    <div class="pass-sub">// PANEL DE ADMINISTRACIÓN — OASIS //</div>
+    <input class="pass-input" type="password" id="passInput"
+      placeholder="Ingresa la clave..." maxlength="30"
+      onkeydown="if(event.key==='Enter')checkPass()">
+    <button class="pass-btn" onclick="checkPass()">⚡ INGRESAR AL SERVIDOR</button>
+    <div class="pass-error" id="passError"></div>
+    <div class="pass-hint">Solo el Game Master puede acceder a este panel</div>
+  </div>
 </div>
 
 <div class="grid-bg"></div>
@@ -324,9 +384,9 @@ body {
   <!-- TABS -->
   <div class="nav-tabs">
     <button class="tab-btn active" onclick="switchTab('lb',this)">⚡ Leaderboard</button>
-    <button class="tab-btn" onclick="switchTab('admin',this)">🛠 Admin XP</button>
+    <button class="tab-btn" onclick="requirePass('admin',this)">🛠 Admin XP</button>
     <button class="tab-btn" onclick="switchTab('perks',this)">🔓 Perks</button>
-    <button class="tab-btn" onclick="switchTab('add',this)">➕ Nuevo Avatar</button>
+    <button class="tab-btn" onclick="requirePass('add',this)">➕ Nuevo Avatar</button>
   </div>
 
   <!-- LEADERBOARD -->
@@ -410,6 +470,63 @@ body {
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     PASSWORD LOGIC (runs before Firebase module)
+════════════════════════════════════════════════════════════ -->
+<script>
+// ── CONTRASEÑA ────────────────────────────────────────────────────────────────
+// Para cambiar la contraseña, edita solo el valor entre comillas de abajo:
+const ADMIN_PASSWORD = 'Cesara@94326683AL';
+let adminUnlocked = false;
+let pendingTab    = null;
+let pendingBtn    = null;
+
+function requirePass(tabName, btn) {
+  if (adminUnlocked) {
+    switchTab(tabName, btn);
+    return;
+  }
+  pendingTab = tabName;
+  pendingBtn = btn;
+  document.getElementById('passInput').value = '';
+  document.getElementById('passError').textContent = '';
+  document.getElementById('passInput').classList.remove('error');
+  document.getElementById('passScreen').classList.remove('hidden');
+  setTimeout(() => document.getElementById('passInput').focus(), 100);
+}
+
+function checkPass() {
+  const val = document.getElementById('passInput').value;
+  if (val === ADMIN_PASSWORD) {
+    adminUnlocked = true;
+    document.getElementById('passScreen').classList.add('hidden');
+    if (pendingTab && pendingBtn) {
+      switchTab(pendingTab, pendingBtn);
+      pendingTab = null; pendingBtn = null;
+    }
+  } else {
+    const inp = document.getElementById('passInput');
+    const err = document.getElementById('passError');
+    inp.classList.remove('error');
+    void inp.offsetWidth; // reflow para reiniciar animación
+    inp.classList.add('error');
+    err.textContent = '⚠ Clave incorrecta. Intenta de nuevo.';
+    inp.value = '';
+    setTimeout(() => inp.classList.remove('error'), 400);
+  }
+}
+// Cerrar pantalla de contraseña si se hace clic fuera del cuadro
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('passScreen').addEventListener('click', function(e) {
+    if (e.target === this) {
+      this.classList.add('hidden');
+      // Volver al tab activo (leaderboard)
+      document.querySelectorAll('.tab-btn')[0].click();
+    }
+  });
+});
+</script>
 
 <!-- ═══════════════════════════════════════════════════════════
      FIREBASE SDK
