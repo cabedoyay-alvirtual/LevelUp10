@@ -264,6 +264,14 @@ body {
 .toast { position:fixed;bottom:24px;right:24px;padding:13px 22px;background:rgba(2,12,28,.97);border:1px solid var(--green);border-radius:3px;font-family:'Orbitron',monospace;font-size:11px;color:var(--green);letter-spacing:2px;z-index:9999;opacity:0;transform:translateY(14px);transition:all .35s cubic-bezier(.4,0,.2,1);box-shadow:0 0 26px rgba(0,255,136,.18);pointer-events:none;max-width:310px; }
 .toast.show { opacity:1;transform:translateY(0); }
 
+/* LOADING */
+.loading-screen { position:fixed;inset:0;background:var(--bg);z-index:9998;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px; }
+.loading-screen.hidden { display:none; }
+.loading-bar-wrap { width:220px;height:3px;background:rgba(0,245,255,.1);border-radius:2px;overflow:hidden; }
+.loading-bar { height:100%;background:var(--cyan);box-shadow:0 0 10px var(--cyan);animation:loadPulse 1.2s ease-in-out infinite; }
+@keyframes loadPulse { 0%{width:0%} 50%{width:80%} 100%{width:100%} }
+.loading-txt { font-family:'Orbitron',monospace;font-size:11px;letter-spacing:4px;color:var(--cyan);animation:pulse 1.5s ease-in-out infinite; }
+
 /* CLASS COLORS */
 .c-tanque    { --cc:#ff4455;color:#ff4455; }
 .c-speedster { --cc:#00f5ff;color:#00f5ff; }
@@ -281,6 +289,13 @@ body {
 </style>
 </head>
 <body>
+
+<!-- PANTALLA DE CARGA -->
+<div class="loading-screen" id="loadingScreen">
+  <div class="loading-txt">CONECTANDO AL SERVIDOR...</div>
+  <div class="loading-bar-wrap"><div class="loading-bar"></div></div>
+</div>
+
 <div class="grid-bg"></div>
 
 <!-- HERO -->
@@ -396,98 +411,121 @@ body {
 
 <div class="toast" id="toast"></div>
 
-<script>
-// ── CONFIG ──────────────────────────────────────────────────────────────────
-const PERKS=[
-  {level:1,xp:200, icon:'🎵',name:'Control del Audio',  desc:'Elige la playlist de la próxima clase.'},
-  {level:2,xp:500, icon:'🕹', name:'Modo Sandbox',       desc:'Los últimos 10 min son de actividad libre.'},
-  {level:3,xp:800, icon:'❤️‍🔥',name:'Vida Extra',         desc:'Repite una prueba física donde no te fue bien.'},
-  {level:4,xp:1200,icon:'🎫',name:'Pase de Batalla',     desc:'Exoneración de una actividad teórica del periodo.'},
-  {level:5,xp:2000,icon:'👑',name:'Game Master',         desc:'Tu equipo diseña y dirige una dinámica completa.'},
+<!-- ═══════════════════════════════════════════════════════════
+     FIREBASE SDK
+════════════════════════════════════════════════════════════ -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getDatabase, ref, onValue, set, update, remove, push, get }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+// ── CONFIGURACIÓN FIREBASE ───────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyD_7MdZ0RXDf1fdCL2a3vRV1XJHPWa-WMw",
+  authDomain: "level-up-daddb.firebaseapp.com",
+  databaseURL: "https://level-up-daddb-default-rtdb.firebaseio.com",
+  projectId: "level-up-daddb",
+  storageBucket: "level-up-daddb.firebasestorage.app",
+  messagingSenderId: "881617643227",
+  appId: "1:881617643227:web:4794c7ebbaa28d4f5ccefe",
+  measurementId: "G-ZE2FRRZHBD"
+};
+
+const app = initializeApp(firebaseConfig);
+const db  = getDatabase(app);
+const playersRef = ref(db, 'players');
+
+// ── CONFIG ───────────────────────────────────────────────────────────────────
+const PERKS = [
+  {level:1, xp:200,  icon:'🎵', name:'Control del Audio',  desc:'Elige la playlist de la próxima clase.'},
+  {level:2, xp:500,  icon:'🕹',  name:'Modo Sandbox',       desc:'Los últimos 10 min son de actividad libre.'},
+  {level:3, xp:800,  icon:'❤️‍🔥', name:'Vida Extra',         desc:'Repite una prueba física donde no te fue bien.'},
+  {level:4, xp:1200, icon:'🎫', name:'Pase de Batalla',     desc:'Exoneración de una actividad teórica del periodo.'},
+  {level:5, xp:2000, icon:'👑', name:'Game Master',         desc:'Tu equipo diseña y dirige una dinámica completa.'},
 ];
-const PRESETS=[
+const PRESETS = [
   {l:'+10 Login',v:10},{l:'+5 Uniforme',v:5},{l:'+50 Misión',v:50},
   {l:'+25 MVP',v:25},{l:'+20 Compañerismo',v:20},{l:'+30 Orden',v:30},
 ];
-const CLS_L={tanque:'🛡 Tanque',speedster:'⚡ Speedster',estratega:'🧠 Estratega',support:'💚 Support'};
-const CLS_C={tanque:'#ff4455',speedster:'#00f5ff',estratega:'#dd00ff',support:'#00ff88'};
-const MEDALS=['🥇','🥈','🥉'];
+const CLS_L = {tanque:'🛡 Tanque',speedster:'⚡ Speedster',estratega:'🧠 Estratega',support:'💚 Support'};
+const CLS_C = {tanque:'#ff4455',speedster:'#00f5ff',estratega:'#dd00ff',support:'#00ff88'};
+const MEDALS = ['🥇','🥈','🥉'];
+
+// Datos iniciales de ejemplo (solo se cargan si Firebase está vacío)
+const DEFAULT_PLAYERS = [
+  {name:'Sebastián Torres', avatar:'ShadowStep_01', cls:'speedster', xp:820},
+  {name:'Valentina Ruiz',   avatar:'IronTitan_V',   cls:'tanque',    xp:1250},
+  {name:'Camilo Ospina',    avatar:'Alpha_Vision',  cls:'estratega', xp:540},
+  {name:'Lucía Martínez',   avatar:'HealBot_L',     cls:'support',   xp:390},
+  {name:'Andrés Pérez',     avatar:'BlitzRunner',   cls:'speedster', xp:1750},
+  {name:'Isabella Gómez',   avatar:'MindCraft_I',   cls:'estratega', xp:680},
+  {name:'Daniel Herrera',   avatar:'ShieldWall_D',  cls:'tanque',    xp:310},
+  {name:'Sofía Vargas',     avatar:'SyncLink_S',    cls:'support',   xp:950},
+];
 
 // ── STATE ────────────────────────────────────────────────────────────────────
-function load(){try{return JSON.parse(localStorage.getItem('lvl10_v3')||'[]');}catch{return[];}}
-function save(){localStorage.setItem('lvl10_v3',JSON.stringify(players));}
-let players=load();
-
-if(!players.length){
-  players=[
-    {id:1,name:'Sebastián Torres',avatar:'ShadowStep_01',cls:'speedster',xp:820},
-    {id:2,name:'Valentina Ruiz',  avatar:'IronTitan_V',  cls:'tanque',   xp:1250},
-    {id:3,name:'Camilo Ospina',   avatar:'Alpha_Vision', cls:'estratega',xp:540},
-    {id:4,name:'Lucía Martínez',  avatar:'HealBot_L',    cls:'support',  xp:390},
-    {id:5,name:'Andrés Pérez',    avatar:'BlitzRunner',  cls:'speedster',xp:1750},
-    {id:6,name:'Isabella Gómez',  avatar:'MindCraft_I',  cls:'estratega',xp:680},
-    {id:7,name:'Daniel Herrera',  avatar:'ShieldWall_D', cls:'tanque',   xp:310},
-    {id:8,name:'Sofía Vargas',    avatar:'SyncLink_S',   cls:'support',  xp:950},
-  ];
-  save();
-}
+let players = [];   // array local sincronizado con Firebase
 
 // ── HELPERS ──────────────────────────────────────────────────────────────────
-const unlocked=xp=>PERKS.filter(p=>xp>=p.xp).length;
-const nextPerk=xp=>PERKS.find(p=>xp<p.xp);
+const unlocked = xp => PERKS.filter(p => xp >= p.xp).length;
+const nextPerk  = xp => PERKS.find(p => xp < p.xp);
 
-function toast(msg,col='var(--green)'){
-  const t=document.getElementById('toast');
-  t.textContent=msg;t.style.borderColor=col;t.style.color=col;
-  t.style.boxShadow=`0 0 26px ${col}33`;
-  t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2800);
+function toast(msg, col='var(--green)') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.borderColor = col;
+  t.style.color = col;
+  t.style.boxShadow = `0 0 26px ${col}33`;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2800);
 }
 
-function updateStats(){
-  const tot=players.reduce((s,p)=>s+p.xp,0);
-  const top=players.reduce((m,p)=>Math.max(m,p.xp),0);
-  const pk =players.reduce((s,p)=>s+unlocked(p.xp),0);
-  document.getElementById('sA').textContent=players.length;
-  document.getElementById('sX').textContent=tot.toLocaleString();
-  document.getElementById('sP').textContent=pk;
-  document.getElementById('sT').textContent=top.toLocaleString();
+function updateStats() {
+  const tot = players.reduce((s,p) => s + p.xp, 0);
+  const top = players.reduce((m,p) => Math.max(m, p.xp), 0);
+  const pk  = players.reduce((s,p) => s + unlocked(p.xp), 0);
+  document.getElementById('sA').textContent = players.length;
+  document.getElementById('sX').textContent = tot.toLocaleString();
+  document.getElementById('sP').textContent = pk;
+  document.getElementById('sT').textContent = top.toLocaleString();
 }
 
-function switchTab(name,btn){
-  document.querySelectorAll('.tab-view').forEach(v=>v.classList.remove('active'));
-  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
-  document.getElementById('tab-'+name).classList.add('active');
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
   btn.classList.add('active');
   if(name==='lb')    renderLB();
   if(name==='admin') renderAdmin();
   if(name==='perks') renderPerks();
 }
+window.switchTab = switchTab;
 
 // ── LEADERBOARD ──────────────────────────────────────────────────────────────
-function renderLB(){
-  const q=(document.getElementById('srch')?.value||'').toLowerCase();
-  const sorted=[...players]
-    .filter(p=>p.name.toLowerCase().includes(q)||p.avatar.toLowerCase().includes(q))
-    .sort((a,b)=>b.xp-a.xp);
-  const list=document.getElementById('lbList');
-  list.innerHTML='';
-  if(!sorted.length){
-    list.innerHTML='<div style="text-align:center;padding:42px;font-family:Share Tech Mono,monospace;color:rgba(200,232,255,.22);letter-spacing:2px;">SIN AVATARES REGISTRADOS</div>';
+function renderLB() {
+  const q = (document.getElementById('srch')?.value || '').toLowerCase();
+  const sorted = [...players]
+    .filter(p => p.name.toLowerCase().includes(q) || p.avatar.toLowerCase().includes(q))
+    .sort((a,b) => b.xp - a.xp);
+  const list = document.getElementById('lbList');
+  list.innerHTML = '';
+  if (!sorted.length) {
+    list.innerHTML = '<div style="text-align:center;padding:42px;font-family:Share Tech Mono,monospace;color:rgba(200,232,255,.22);letter-spacing:2px;">SIN AVATARES REGISTRADOS</div>';
     return;
   }
-  sorted.forEach((p,i)=>{
-    const rank=i+1,col=CLS_C[p.cls];
-    const next=nextPerk(p.xp);
-    const pct=next?Math.min(100,(p.xp/next.xp)*100):100;
-    const dots=PERKS.map((_,di)=>`<div class="p-dot ${di<unlocked(p.xp)?'on':''}"></div>`).join('');
-    const row=document.createElement('div');
-    row.className=`lb-row c-${p.cls} ${rank<=3?'top-'+rank:''}`;
-    row.style.setProperty('--cc',col);
-    row.innerHTML=`
+  sorted.forEach((p, i) => {
+    const rank = i + 1, col = CLS_C[p.cls];
+    const next = nextPerk(p.xp);
+    const pct  = next ? Math.min(100,(p.xp/next.xp)*100) : 100;
+    const dots = PERKS.map((_,di) => `<div class="p-dot ${di < unlocked(p.xp) ? 'on' : ''}"></div>`).join('');
+    const row  = document.createElement('div');
+    row.className = `lb-row c-${p.cls} ${rank<=3 ? 'top-'+rank : ''}`;
+    row.style.setProperty('--cc', col);
+    row.innerHTML = `
       <div class="rank ${rank<=3?'r'+rank:''}">${rank<=3?MEDALS[rank-1]:rank}</div>
       <div class="p-info">
         <div class="p-avatar">${p.avatar}</div>
-        <div class="p-real">${p.name} · ${next?`${p.xp}/${next.xp} XP → Nv.${next.level}`:'🌟 NIVEL MÁXIMO'}</div>
+        <div class="p-real">${p.name} · ${next ? `${p.xp}/${next.xp} XP → Nv.${next.level}` : '🌟 NIVEL MÁXIMO'}</div>
         <div class="p-dots">${dots}</div>
         <div class="p-bar-track"><div class="p-bar-fill" style="width:${pct}%;--cc:${col}"></div></div>
       </div>
@@ -498,117 +536,137 @@ function renderLB(){
   });
   updateStats();
 }
+window.renderLB = renderLB;
 
 // ── ADMIN ────────────────────────────────────────────────────────────────────
-function renderAdmin(){
-  const grid=document.getElementById('adminGrid');
-  grid.innerHTML='';
-  [...players].sort((a,b)=>a.name.localeCompare(b.name)).forEach(p=>{
-    const col=CLS_C[p.cls];
-    const presets=PRESETS.map(pr=>`<button class="pst-btn" onclick="quickXP(${p.id},${pr.v},'${pr.l}')">${pr.l}</button>`).join('');
-    const card=document.createElement('div');
-    card.className=`ac c-${p.cls}`;card.id=`ac-${p.id}`;
-    card.style.setProperty('--cc',col);
-    card.innerHTML=`
+function renderAdmin() {
+  const grid = document.getElementById('adminGrid');
+  grid.innerHTML = '';
+  [...players].sort((a,b) => a.name.localeCompare(b.name)).forEach(p => {
+    const col     = CLS_C[p.cls];
+    const presets = PRESETS.map(pr =>
+      `<button class="pst-btn" onclick="quickXP('${p.id}',${pr.v},'${pr.l}')">${pr.l}</button>`
+    ).join('');
+    const card = document.createElement('div');
+    card.className = `ac c-${p.cls}`;
+    card.id = `ac-${p.id}`;
+    card.style.setProperty('--cc', col);
+    card.innerHTML = `
       <div class="ac-name">${p.name}</div>
       <div class="ac-ava">// ${p.avatar} · ${CLS_L[p.cls]}</div>
       <div class="ac-xp-row">
-        <input class="xp-inp" id="xi-${p.id}" type="number" value="${p.xp}" min="0" onchange="setXP(${p.id})">
-        <button class="btn-add" onclick="addByInput(${p.id})">+ ADD</button>
-        <button class="btn-sub" onclick="subByInput(${p.id})">− SUB</button>
+        <input class="xp-inp" id="xi-${p.id}" type="number" value="${p.xp}" min="0">
+        <button class="btn-add" onclick="addByInput('${p.id}')">+ ADD</button>
+        <button class="btn-sub" onclick="subByInput('${p.id}')">− SUB</button>
       </div>
       <div class="preset-row">${presets}</div>
       <div class="ac-actions">
-        <button class="btn-edit" onclick="openEdit(${p.id})">✏️ EDITAR</button>
-        <button class="btn-del"  onclick="deletePlayer(${p.id})">🗑 ELIMINAR</button>
+        <button class="btn-edit" onclick="openEdit('${p.id}')">✏️ EDITAR</button>
+        <button class="btn-del"  onclick="deletePlayer('${p.id}')">🗑 ELIMINAR</button>
       </div>
     `;
     grid.appendChild(card);
   });
 }
 
-function setXP(id){
-  const el=document.getElementById(`xi-${id}`);
-  const p=players.find(x=>x.id===id);if(!p)return;
-  const prev=unlocked(p.xp);
-  p.xp=Math.max(0,parseInt(el.value)||0);el.value=p.xp;
-  checkUnlock(p,prev);save();updateStats();
+// ── GUARDAR XP EN FIREBASE ───────────────────────────────────────────────────
+async function saveXP(id, newXP) {
+  await update(ref(db, 'players/' + id), { xp: newXP });
 }
 
-function quickXP(id,val,label){
-  const p=players.find(x=>x.id===id);if(!p)return;
-  const prev=unlocked(p.xp);
-  p.xp=Math.max(0,p.xp+val);
-  const el=document.getElementById(`xi-${id}`);if(el)el.value=p.xp;
-  checkUnlock(p,prev);save();updateStats();
-  toast(`${val>0?'+':''}${val} XP → ${p.avatar}`,val>0?'var(--green)':'var(--red)');
+function checkUnlock(player, prev) {
+  const now = unlocked(player.xp);
+  if (now > prev) {
+    const pk = PERKS[now-1];
+    toast(`🔓 ${player.avatar} DESBLOQUEÓ: ${pk.name}!`, 'var(--gold)');
+  }
 }
 
-function addByInput(id){
-  const p=players.find(x=>x.id===id);
-  const el=document.getElementById(`xi-${id}`);if(!p||!el)return;
-  const val=parseInt(el.value)||0;
-  const prev=unlocked(p.xp);
-  p.xp=Math.max(0,p.xp+val);el.value=p.xp;
-  checkUnlock(p,prev);save();updateStats();
+function quickXP(id, val, label) {
+  const p = players.find(x => x.id === id);
+  if (!p) return;
+  const prev = unlocked(p.xp);
+  p.xp = Math.max(0, p.xp + val);
+  const el = document.getElementById(`xi-${id}`);
+  if (el) el.value = p.xp;
+  checkUnlock(p, prev);
+  saveXP(id, p.xp);
+  toast(`${val>0?'+':''}${val} XP → ${p.avatar}`, val>0?'var(--green)':'var(--red)');
+}
+window.quickXP = quickXP;
+
+function addByInput(id) {
+  const p  = players.find(x => x.id === id);
+  const el = document.getElementById(`xi-${id}`);
+  if (!p || !el) return;
+  const val  = parseInt(el.value) || 0;
+  const prev = unlocked(p.xp);
+  p.xp = Math.max(0, p.xp + val);
+  el.value = p.xp;
+  checkUnlock(p, prev);
+  saveXP(id, p.xp);
   toast(`+${val} XP → ${p.avatar}`);
 }
+window.addByInput = addByInput;
 
-function subByInput(id){
-  const p=players.find(x=>x.id===id);
-  const el=document.getElementById(`xi-${id}`);if(!p||!el)return;
-  const val=parseInt(el.value)||0;
-  p.xp=Math.max(0,p.xp-val);el.value=p.xp;
-  save();updateStats();
-  toast(`-${val} XP → ${p.avatar}`,'var(--red)');
+function subByInput(id) {
+  const p  = players.find(x => x.id === id);
+  const el = document.getElementById(`xi-${id}`);
+  if (!p || !el) return;
+  const val = parseInt(el.value) || 0;
+  p.xp = Math.max(0, p.xp - val);
+  el.value = p.xp;
+  saveXP(id, p.xp);
+  toast(`-${val} XP → ${p.avatar}`, 'var(--red)');
 }
-
-function checkUnlock(player,prev){
-  const now=unlocked(player.xp);
-  if(now>prev){const pk=PERKS[now-1];toast(`🔓 ${player.avatar} DESBLOQUEÓ: ${pk.name}!`,'var(--gold)');}
-}
+window.subByInput = subByInput;
 
 // ── EDIT ─────────────────────────────────────────────────────────────────────
-function openEdit(id){
-  const p=players.find(x=>x.id===id);if(!p)return;
-  document.getElementById('eId').value=id;
-  document.getElementById('eName').value=p.name;
-  document.getElementById('eAva').value=p.avatar;
-  document.getElementById('eCls').value=p.cls;
+function openEdit(id) {
+  const p = players.find(x => x.id === id);
+  if (!p) return;
+  document.getElementById('eId').value   = id;
+  document.getElementById('eName').value = p.name;
+  document.getElementById('eAva').value  = p.avatar;
+  document.getElementById('eCls').value  = p.cls;
   document.getElementById('editModal').classList.add('open');
 }
+window.openEdit = openEdit;
 
-function closeModal(){document.getElementById('editModal').classList.remove('open');}
+function closeModal() { document.getElementById('editModal').classList.remove('open'); }
+window.closeModal = closeModal;
 
-function saveEdit(){
-  const id=parseInt(document.getElementById('eId').value);
-  const p=players.find(x=>x.id===id);if(!p)return;
-  const name=document.getElementById('eName').value.trim();
-  const avatar=document.getElementById('eAva').value.trim();
-  const cls=document.getElementById('eCls').value;
-  if(!name||!avatar){toast('⚠ Completa todos los campos','var(--red)');return;}
-  p.name=name;p.avatar=avatar;p.cls=cls;
-  save();closeModal();renderAdmin();renderLB();
+async function saveEdit() {
+  const id     = document.getElementById('eId').value;
+  const name   = document.getElementById('eName').value.trim();
+  const avatar = document.getElementById('eAva').value.trim();
+  const cls    = document.getElementById('eCls').value;
+  if (!name || !avatar) { toast('⚠ Completa todos los campos','var(--red)'); return; }
+  await update(ref(db, 'players/' + id), { name, avatar, cls });
+  closeModal();
   toast(`✓ Avatar actualizado: ${avatar}`);
 }
+window.saveEdit = saveEdit;
 
 // ── DELETE ────────────────────────────────────────────────────────────────────
-function deletePlayer(id){
-  const p=players.find(x=>x.id===id);if(!p)return;
-  if(!confirm(`¿Eliminar a "${p.avatar}" (${p.name}) del servidor?\nEsta acción no puede deshacerse.`))return;
-  players=players.filter(x=>x.id!==id);
-  save();renderAdmin();renderLB();updateStats();
-  toast(`🗑 ${p.avatar} eliminado del servidor`,'var(--red)');
+async function deletePlayer(id) {
+  const p = players.find(x => x.id === id);
+  if (!p) return;
+  if (!confirm(`¿Eliminar a "${p.avatar}" (${p.name}) del servidor?\nEsta acción no puede deshacerse.`)) return;
+  await remove(ref(db, 'players/' + id));
+  toast(`🗑 ${p.avatar} eliminado del servidor`, 'var(--red)');
 }
+window.deletePlayer = deletePlayer;
 
 // ── PERKS ─────────────────────────────────────────────────────────────────────
-function renderPerks(){
-  const grid=document.getElementById('perksGrid');grid.innerHTML='';
-  PERKS.forEach(pk=>{
-    const count=players.filter(p=>p.xp>=pk.xp).length;
-    const card=document.createElement('div');
-    card.className=`pk ${count>0?'unlocked':'locked'}`;
-    card.innerHTML=`
+function renderPerks() {
+  const grid = document.getElementById('perksGrid');
+  grid.innerHTML = '';
+  PERKS.forEach(pk => {
+    const count = players.filter(p => p.xp >= pk.xp).length;
+    const card  = document.createElement('div');
+    card.className = `pk ${count > 0 ? 'unlocked' : 'locked'}`;
+    card.innerHTML = `
       <span class="pk-icon">${pk.icon}</span>
       <div class="pk-level">NIVEL ${pk.level}</div>
       <div class="pk-xp">${pk.xp.toLocaleString()} XP</div>
@@ -621,29 +679,65 @@ function renderPerks(){
 }
 
 // ── ADD PLAYER ────────────────────────────────────────────────────────────────
-function addPlayer(){
-  const name=document.getElementById('inName').value.trim();
-  const avatar=document.getElementById('inAva').value.trim();
-  const cls=document.getElementById('inCls').value;
-  if(!name||!avatar){toast('⚠ Completa todos los campos','var(--red)');return;}
-  players.push({id:Date.now(),name,avatar,cls,xp:0});
-  save();
-  document.getElementById('inName').value='';
-  document.getElementById('inAva').value='';
-  updateStats();toast(`✓ ${avatar} registrado en el servidor!`);
+async function addPlayer() {
+  const name   = document.getElementById('inName').value.trim();
+  const avatar = document.getElementById('inAva').value.trim();
+  const cls    = document.getElementById('inCls').value;
+  if (!name || !avatar) { toast('⚠ Completa todos los campos','var(--red)'); return; }
+  const newRef = push(playersRef);
+  await set(newRef, { name, avatar, cls, xp: 0 });
+  document.getElementById('inName').value = '';
+  document.getElementById('inAva').value  = '';
+  toast(`✓ ${avatar} registrado en el servidor!`);
 }
+window.addPlayer = addPlayer;
 
-function resetAll(){
-  if(!confirm('¿Reiniciar TODOS los datos del servidor?\nEsta acción no puede deshacerse.'))return;
-  players=[];save();renderLB();renderAdmin();updateStats();
-  toast('SERVIDOR REINICIADO','var(--red)');
+async function resetAll() {
+  if (!confirm('¿Reiniciar TODOS los datos del servidor?\nEsta acción no puede deshacerse.')) return;
+  await set(playersRef, null);
+  toast('SERVIDOR REINICIADO', 'var(--red)');
 }
+window.resetAll = resetAll;
 
-// ── BACKDROP CLOSE ────────────────────────────────────────────────────────────
-document.getElementById('editModal').addEventListener('click',function(e){if(e.target===this)closeModal();});
+// ── ESCUCHAR CAMBIOS EN TIEMPO REAL ──────────────────────────────────────────
+// Esta es la magia: onValue se ejecuta CADA VEZ que alguien cambia algo en Firebase
+onValue(playersRef, (snapshot) => {
+  const data = snapshot.val();
+  if (data) {
+    players = Object.entries(data).map(([id, val]) => ({ id, ...val }));
+  } else {
+    players = [];
+  }
 
-// ── INIT ──────────────────────────────────────────────────────────────────────
-renderLB();updateStats();
+  // Ocultar pantalla de carga la primera vez
+  document.getElementById('loadingScreen').classList.add('hidden');
+
+  // Re-renderizar todo
+  renderLB();
+  // Si admin está visible, refrescarlo también
+  const adminTab = document.getElementById('tab-admin');
+  if (adminTab.classList.contains('active')) renderAdmin();
+  const perksTab = document.getElementById('tab-perks');
+  if (perksTab.classList.contains('active')) renderPerks();
+  updateStats();
+});
+
+// ── CARGAR DATOS INICIALES SI FIREBASE ESTÁ VACÍO ───────────────────────────
+get(playersRef).then(snapshot => {
+  if (!snapshot.exists()) {
+    // Solo la primera vez: carga los jugadores de ejemplo
+    DEFAULT_PLAYERS.forEach(p => {
+      const newRef = push(playersRef);
+      set(newRef, p);
+    });
+  }
+});
+
+// ── MODAL BACKDROP ────────────────────────────────────────────────────────────
+document.getElementById('editModal').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
 </script>
 </body>
 </html>
